@@ -24,8 +24,9 @@ class HyperParameters:
     def __init__(self, VAL_FOLD):
         # training
         self.LEARNING_RATE = 0.001
-        self.NUM_HIDDEN = 256
-        self.NUM_LSTM = 1
+        self.NUM_LSTM_HIDDEN = 256
+        self.NUM_GRID_HIDDEN = 256
+        self.NUM_LSTM = 2
         self.OUTPUT_THRESHOLD = 0.5
 
         # dropout
@@ -105,7 +106,7 @@ class HyperParameters:
         return [y / x for x, y in zip(pos, neg)]
 
     def unit_lstm(self):
-        lstm_cell = tf.contrib.rnn.BasicLSTMCell(self.NUM_HIDDEN, forget_bias=self.FORGET_BIAS)
+        lstm_cell = tf.contrib.rnn.BasicLSTMCell(self.NUM_LSTM_HIDDEN, forget_bias=self.FORGET_BIAS)
         lstm_cell = tf.contrib.rnn.DropoutWrapper(cell=lstm_cell, input_keep_prob=1.0, output_keep_prob=self.OUTPUT_KEEP_PROB)
         return lstm_cell
 
@@ -141,10 +142,10 @@ class HyperParameters:
             batch_x_shape = tf.shape(x)
             input = tf.reshape(x, [batch_x_shape[0], -1, 160])
 
-            grid_lstm_cell = grid_rnn_cell.Grid2BasicLSTMCell(num_units=self.NUM_HIDDEN)
+            grid_lstm_cell = grid_rnn_cell.Grid2BasicLSTMCell(num_units=self.NUM_GRID_HIDDEN)
             grid_lstm_cell = rnn_cell.DropoutWrapper(grid_lstm_cell, output_keep_prob=0.9)
             initial_state = grid_lstm_cell.zero_state(self.BATCH_SIZE,tf.float32)
-            layer0, states = tf.nn.dynamic_rnn(cell=grid_lstm_cell,
+            layer0, _ = tf.nn.dynamic_rnn(cell=grid_lstm_cell,
                                                inputs=input,
                                                time_major=False,
                                                dtype=tf.float32)
@@ -154,7 +155,7 @@ class HyperParameters:
                                                      state_is_tuple=True)
             states = self.get_state_variables(ldnn_cell)
 
-            layer0 = tf.reshape(layer0, [self.BATCH_SIZE, self.TIMELENGTH, self.NUM_HIDDEN])
+            layer0 = tf.reshape(layer0, [self.BATCH_SIZE, self.TIMELENGTH, self.NUM_LSTM_HIDDEN])
 
             outputs, new_states = tf.nn.dynamic_rnn(cell=ldnn_cell,
                                                inputs=layer0,
@@ -164,7 +165,7 @@ class HyperParameters:
                                                sequence_length=seq)
             update_op = self.get_state_update_op(states, new_states)
 
-            outputs = tf.reshape(outputs, [-1, self.NUM_HIDDEN])
+            outputs = tf.reshape(outputs, [-1, self.NUM_LSTM_HIDDEN])
             top = tf.nn.dropout(tf.matmul(outputs, weights['out']),keep_prob=self.OUTPUT_KEEP_PROB)
             original_out = tf.reshape(top, [batch_x_shape[0], -1, self.NUM_CLASSES])
         return original_out, update_op
@@ -198,7 +199,7 @@ class HyperParameters:
         # Define weights
         weights = {
             # Hidden layer weights => 2*n_hidden because of forward + backward cells
-            'out': tf.Variable(tf.random_normal([self.NUM_HIDDEN, self.NUM_CLASSES]))
+            'out': tf.Variable(tf.random_normal([self.NUM_LSTM_HIDDEN, self.NUM_CLASSES]))
         }
 
         # logits = [batch_size,time_steps,number_class]
@@ -260,7 +261,7 @@ class HyperParameters:
                                     Batch size: {}'''.format(
                 self.VAL_FOLD,
                 self.EPOCHS,
-                self.NUM_HIDDEN,
+                self.NUM_LSTM_HIDDEN,
                 self.BATCH_SIZE))
             train_handle = sess.run(train_iterator.string_handle())
             test_handle = sess.run(test_iterator.string_handle())
