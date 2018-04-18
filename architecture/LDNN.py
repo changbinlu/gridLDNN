@@ -20,6 +20,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 class HyperParameters:
     def __init__(self, VAL_FOLD):
+        self.LOG_FLODER = './log414_resume/'
         # training
         self.LEARNING_RATE = 0.001
         self.NUM_HIDDEN = 512
@@ -29,10 +30,10 @@ class HyperParameters:
         # dropout
         self.INPUT_KEEP_PROB = 1.0
         self.OUTPUT_KEEP_PROB = 0.9
-        self.BATCH_SIZE = 40
-        self.EPOCHS = 100
+        self.BATCH_SIZE = 60
+        self.EPOCHS = 60
         self.FORGET_BIAS = 0.9
-        self.TIMELENGTH = 3000
+        self.TIMELENGTH = 2000
         self.MAX_GRAD_NORM = 5.0
         self.NUM_CLASSES = 13
 
@@ -72,8 +73,8 @@ class HyperParameters:
         for instance in filename.split('@'):
             p, start, end = instance.split('&')
             data = np.load(p)
-            x = np.reshape(data['x'], [-1, 160])
-            y = np.transpose(data['y'])
+            x = data['x'][0]
+            y = data['y'][0]
             fx = np.concatenate((fx, x[int(start):int(end)]), axis=0)
             fy = np.concatenate((fy, y[int(start):int(end)]), axis=0)
         l = np.array([fx.shape[0]])
@@ -231,7 +232,7 @@ class HyperParameters:
         # logging.basicConfig(level=logging.DEBUG,format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
         # logging.basicConfig(level=logging.DEBUG,format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',filename='./log327.txt')
         log_name = 'log' + str(self.VAL_FOLD)
-        self.setup_logger(log_name,log_file='./log405_resume/'+str(self.VAL_FOLD)+'.txt')
+        self.setup_logger(log_name,log_file= self.LOG_FLODER + str(self.VAL_FOLD)+'.txt')
 
         logger = logging.getLogger(log_name)
         tf.logging.set_verbosity(tf.logging.INFO)

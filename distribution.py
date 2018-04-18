@@ -25,11 +25,11 @@ def get_weight(paths):
     count_positive = 13 * [0]
     count_negative = 13 * [0]
     for p in paths:
-        if p == '/mnt/raid/data/ni/twoears/scenes2018/train/fold2/scene9/generalSoundsNI.footsteps.FOOTSTEPS-OUTDOOR_GEN-HDF-12316.wav.mat.npz':
-            continue
+        # if p == '/mnt/raid/data/ni/twoears/scenes2018/train/fold2/scene9/generalSoundsNI.footsteps.FOOTSTEPS-OUTDOOR_GEN-HDF-12316.wav.mat.npz':
+        #     continue
         print(p)
         data = np.load(p)
-        y = data['y']
+        y = np.transpose(data['y'][0])
         total_frames = total_frames + y.shape[1]
         for i in range(13):
             count_positive[i] = count_positive[i] + (y[i, :] == 1).sum()

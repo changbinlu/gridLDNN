@@ -49,3 +49,11 @@ def get_indexpath(p):
 #
 #         paths += path
 #     get_indexpath(paths)
+import pickle
+def get_index(paths):
+    result = []
+    pkl_file = open('/mnt/raid/data/ni/twoears/scenes2018/train/file_lengths.pickle','rb')
+    data = pickle.load(pkl_file)
+    for i,p in enumerate(paths):
+        result.append([i,data[p],p])
+    return np.array(result)
