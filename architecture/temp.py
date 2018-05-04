@@ -4,69 +4,46 @@ from glob import glob
 import sys
 sys.path.insert(0, '/home/changbinli/script/rnn/')
 import logging
-
 import time
-from basic.batch_generation import get_filepaths
-from get_train_pathlength import get_index
+from dataloader import get_train_data, get_valid_data, get_scenes_weight
 import numpy as np
-from tensorflow.contrib.grid_rnn.python.ops import grid_rnn_cell
-from tensorflow.python.ops import rnn, rnn_cell
 # from hyperband.common_defs import *
 '''
 For block_intepreter with rectangle 
 '''
 logger = logging.getLogger(__name__)
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
 class HyperParameters:
     def __init__(self, VAL_FOLD):
+        self.LOG_FLODER = './log418/'
         # training
-        self.LOG_FLODER = './log417/'
         self.LEARNING_RATE = 0.001
-        self.NUM_LSTM_HIDDEN = 512
-        self.NUM_GRID_HIDDEN = 512
+        self.NUM_HIDDEN = 512
         self.NUM_LSTM = 3
         self.OUTPUT_THRESHOLD = 0.5
-
+        self.SCENES = ['scene1']
         # dropout
         self.INPUT_KEEP_PROB = 1.0
-        self.OUTPUT_KEEP_PROB = 0.5
-        self.BATCH_SIZE = 40
-        self.EPOCHS = 30
-        self.FORGET_BIAS = 1
-        self.TIMELENGTH = 1000
+        self.OUTPUT_KEEP_PROB = 0.9
+        self.BATCH_SIZE = 90
+        self.EPOCHS = 300
+        self.FORGET_BIAS = 0.9
+        self.TIMELENGTH = 2000
         self.MAX_GRAD_NORM = 5.0
         self.NUM_CLASSES = 13
 
         # further parameters
         self.VAL_FOLD = VAL_FOLD
-        self.TRAIN_SET = self.get_train_rectangle()
-        self.TEST_SET = self.get_valid_rectangle()
+        self.TRAIN_SET, self.PATHS = get_train_data(self.VAL_FOLD,self.SCENES,self.EPOCHS,self.TIMELENGTH)
+        self.VALID_SET = get_valid_data(self.VAL_FOLD,self.SCENES, 1, self.TIMELENGTH)
         self.TOTAL_SAMPLES = len(self.PATHS)
         self.NUM_TRAIN = len(self.TRAIN_SET)
-        self.NUM_TEST = len(self.TEST_SET)
+        self.NUM_TEST = len(self.VALID_SET)
         self.SET = {'train': self.TRAIN_SET,
-               'test': self.TEST_SET}
-
-    def get_train_rectangle(self):
-        tt = time.time()
-        self.PATHS = []
-        for f in range(1, 7):
-            if f == self.VAL_FOLD: continue
-            p = '/mnt/raid/data/ni/twoears/scenes2018/train/fold' + str(f) + '/scene66'
-            path = glob(p + '/**/**/*.npz', recursive=True)
-            self.PATHS += path
-        INDEX_PATH = get_index(self.PATHS)
-        out = get_filepaths(self.EPOCHS, self.TIMELENGTH, INDEX_PATH)
-        print("Construt rectangel time:",time.time()-tt)
-        return out
-    def get_valid_rectangle(self):
-        self.DIR_TEST = '/mnt/raid/data/ni/twoears/scenes2018/train/fold'+ str(self.VAL_FOLD)+'/scene1'
-        PATH_TEST = glob(self.DIR_TEST + '/*.npz', recursive=True)
-        INDEX_PATH_TEST = get_index(PATH_TEST)
-        return get_filepaths(1, self.TIMELENGTH, INDEX_PATH_TEST)
+               'test': self.VALID_SET}
 
     def _read_py_function(self,filename):
         filename = filename.decode(sys.getdefaultencoding())
@@ -90,24 +67,10 @@ class HyperParameters:
         # batch = dataset.padded_batch(batchsize, padded_shapes=([None, None], [None, None], [None]))
         batch = dataset.batch(batchsize)
         return batch
-    def get_weight(self,scene_list):
-        weight_dir = '/mnt/raid/data/ni/twoears/trainweight.npy'
-        #  folder, scene, w_postive, w_negative
-        w = np.load(weight_dir)
-        count_pos = count_neg = [0] * 13
-        for i in scene_list:
-            for j in w:
-                if j[0] == str(self.VAL_FOLD) and j[1] == i:
-                    count_pos = [x + int(y) for x, y in zip(count_pos, j[2:15])]
-                    count_neg = [x + int(y) for x, y in zip(count_neg, j[15:28])]
-                    break
-        total = (sum(count_pos) + sum(count_neg))
-        pos = [x / total for x in count_pos]
-        neg = [x / total for x in count_neg]
-        return [y / x for x, y in zip(pos, neg)]
+
 
     def unit_lstm(self):
-        lstm_cell = tf.contrib.rnn.BasicLSTMCell(self.NUM_LSTM_HIDDEN, forget_bias=self.FORGET_BIAS)
+        lstm_cell = tf.contrib.rnn.BasicLSTMCell(self.NUM_HIDDEN, forget_bias=self.FORGET_BIAS)
         lstm_cell = tf.contrib.rnn.DropoutWrapper(cell=lstm_cell, input_keep_prob=1.0, output_keep_prob=self.OUTPUT_KEEP_PROB)
         return lstm_cell
 
@@ -139,34 +102,21 @@ class HyperParameters:
         return self.get_state_update_op(state_variables, zero_states)
 
     def MultiRNN(self,x,weights,seq):
-        with tf.variable_scope('grid_lstm'):
-            batch_x_shape = tf.shape(x)
-            input = tf.reshape(x, [batch_x_shape[0], -1, 160])
-
-            grid_lstm_cell = grid_rnn_cell.Grid2BasicLSTMCell(num_units=self.NUM_GRID_HIDDEN)
-            grid_lstm_cell = rnn_cell.DropoutWrapper(grid_lstm_cell, output_keep_prob=0.9)
-            initial_state = grid_lstm_cell.zero_state(self.BATCH_SIZE,tf.float32)
-            layer0, _ = tf.nn.dynamic_rnn(cell=grid_lstm_cell,
-                                               inputs=input,
-                                               time_major=False,
-                                               dtype=tf.float32)
         with tf.variable_scope('lstm', initializer=tf.orthogonal_initializer()):
-
-            ldnn_cell = tf.contrib.rnn.MultiRNNCell([self.unit_lstm() for _ in range(self.NUM_LSTM)],
-                                                     state_is_tuple=True)
-            states = self.get_state_variables(ldnn_cell)
-
-            layer0 = tf.reshape(layer0, [self.BATCH_SIZE, self.TIMELENGTH, self.NUM_LSTM_HIDDEN])
-
-            outputs, new_states = tf.nn.dynamic_rnn(cell=ldnn_cell,
-                                               inputs=layer0,
+            mlstm_cell = tf.contrib.rnn.MultiRNNCell([self.unit_lstm() for _ in range(self.NUM_LSTM)], state_is_tuple=True)
+            states = self.get_state_variables(mlstm_cell)
+            batch_x_shape = tf.shape(x)
+            layer = tf.reshape(x, [batch_x_shape[0], -1, 160])
+            # init_state = mlstm_cell.zero_state(self.BATCH_SIZE, dtype=tf.float32)
+            outputs, new_states = tf.nn.dynamic_rnn(cell=mlstm_cell,
+                                               inputs=layer,
                                                initial_state= states,
                                                dtype=tf.float32,
                                                time_major=False,
                                                sequence_length=seq)
             update_op = self.get_state_update_op(states, new_states)
 
-            outputs = tf.reshape(outputs, [-1, self.NUM_LSTM_HIDDEN])
+            outputs = tf.reshape(outputs, [-1, self.NUM_HIDDEN])
             top = tf.nn.dropout(tf.matmul(outputs, weights['out']),keep_prob=self.OUTPUT_KEEP_PROB)
             original_out = tf.reshape(top, [batch_x_shape[0], -1, self.NUM_CLASSES])
         return original_out, update_op
@@ -199,15 +149,14 @@ class HyperParameters:
         test_iterator = test_batch.make_initializable_iterator()
         # Define weights
         weights = {
-            # Hidden layer weights => 2*n_hidden because of forward + backward cells
-            'out': tf.Variable(tf.random_normal([self.NUM_LSTM_HIDDEN, self.NUM_CLASSES]))
+            'out': tf.Variable(tf.random_normal([self.NUM_HIDDEN, self.NUM_CLASSES]))
         }
 
         # logits = [batch_size,time_steps,number_class]
         logits, update_op = self.MultiRNN(X, weights, seq)
 
         # Define loss and optimizer
-        w = self.get_weight(['scene1'])
+        w = get_scenes_weight(self.SCENES,self.VAL_FOLD)
 
         with tf.variable_scope('loss'):
             # convert nan to +1
@@ -245,10 +194,8 @@ class HyperParameters:
 
         # Initialize the variables (i.e. assign their default value)
         init = tf.global_variables_initializer()
-        # logging.basicConfig(level=logging.DEBUG,format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
-        # logging.basicConfig(level=logging.DEBUG,format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',filename='./log327.txt')
         log_name = 'log' + str(self.VAL_FOLD)
-        self.setup_logger(log_name, log_file=self.LOG_FLODER + str(self.VAL_FOLD) + '.txt')
+        self.setup_logger(log_name,log_file= self.LOG_FLODER + str(self.VAL_FOLD)+'.txt')
 
         logger = logging.getLogger(log_name)
         tf.logging.set_verbosity(tf.logging.INFO)
@@ -259,11 +206,19 @@ class HyperParameters:
                                     K_folder:{}
                                     Epochs: {}
                                     Number of hidden neuron: {}
-                                    Batch size: {}'''.format(
+                                    Batch size: {}
+                                    FORGET_BIAS: {}
+                                    TIMELENGTH: {}
+                                    Dropout: {}
+                                    Scenes:{}'''.format(
                 self.VAL_FOLD,
                 self.EPOCHS,
-                self.NUM_LSTM_HIDDEN,
-                self.BATCH_SIZE))
+                self.NUM_HIDDEN,
+                self.BATCH_SIZE,
+                self.FORGET_BIAS,
+                self.TIMELENGTH,
+                self.OUTPUT_KEEP_PROB,
+                self.SCENES))
             train_handle = sess.run(train_iterator.string_handle())
             test_handle = sess.run(test_iterator.string_handle())
             # Run the initializer
@@ -344,3 +299,4 @@ if __name__ == "__main__":
         with tf.Graph().as_default():
             hyperparameters = HyperParameters(VAL_FOLD=i)
             hyperparameters.main()
+
